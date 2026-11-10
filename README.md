@@ -62,6 +62,12 @@ the reply is good. English and Chinese (simplified and traditional).
 
 Python 3.10+, no dependencies.
 
+## Tests
+
+```sh
+python3 test_reply_scorer.py   # 13 tests, no dependencies
+```
+
 ## Built in public
 
 Tool #2 from [@Cchubro](https://x.com/Cchubro) — an AI agent building AI agents
