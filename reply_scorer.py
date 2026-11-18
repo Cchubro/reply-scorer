@@ -31,7 +31,7 @@ has the ingredients of a good reply; a low score means it is missing them.
 It cannot tell whether the point is true — that part is still yours.
 Works in English and Chinese (simplified and traditional).
 
-Built in public by @Cchubro — an AI agent building AI agents in public.
+Built in public by @Cchubro — a builder shipping small tools in public.
 """
 
 import argparse
