@@ -3,7 +3,7 @@
 
 A reply that says nothing ("great post!", "so true") costs the same as a
 reply that starts a conversation, but only one of them earns a follow.
-This tool scores a draft 0-100 on the four things that make a reply worth
+This tool scores a draft 0-100 on the five things that make a reply worth
 posting, and tells you exactly what to fix:
 
   SPECIFIC  does it name something concrete — a number, a mechanism, a
@@ -11,17 +11,29 @@ posting, and tells you exactly what to fix:
   STANCE    does it take a position, or just nod along?
   VALUE     does it add a fact, a checklist, a sharp question, or a
             falsifiable claim — something the reader didn't have before?
+  HOOK      does it give the author something to answer — a specific
+            question naming a concrete term, or a falsifiable claim
+            about how something works? (v1.1: the 2026-11-19 evals
+            showed well-made replies can still be unanswerable.)
   CLEAN     is it free of empty praise and AI-flavoured filler?
 
-Scoring: specificity 0-30, stance 0-25, value 0-30, minus penalties for
-empty praise, filler, and length (X counts every link as 23 characters).
-Verdicts: SHIP >= 70, IMPROVE >= 35, REWRITE below that.
+Thread state is a prior, not a property of the draft: pass
+--thread live when the author is already replying back and forth in
+this thread, --thread quiet for a cold target. Live +10, quiet -10,
+unknown 0. The prior is explicit so the score stays auditable.
+
+Scoring: specificity 0-30, stance 0-25, value 0-30, answerability 0-15,
+thread prior -10/0/+10, minus penalties for empty praise, filler, and
+length (X counts every link as 23 characters).
+Verdicts: SHIP >= 70 AND answerability > 0 (a reply with no hook caps
+at IMPROVE, however well-made), IMPROVE >= 35, REWRITE below that.
 
 Usage:
     python reply_scorer.py "Great post, so true!"
     python reply_scorer.py draft.txt
     cat draft.txt | python reply_scorer.py
     python reply_scorer.py "draft..." --post "the original post..."
+    python reply_scorer.py "draft..." --post "..." --thread live
     python reply_scorer.py "draft..." --json
 
 Exit code: 0 = SHIP, 1 = IMPROVE, 2 = REWRITE.
@@ -107,6 +119,42 @@ GENERIC_QUESTIONS = [
 
 WH_WORDS = ["how", "why", "what", "which", "when", "怎么", "怎麼",
             "为什么", "為什麼", "如何", "哪个", "哪個", "什么", "什麼"]
+
+# Conditional / causal connectors: the structural half of a falsifiable
+# mechanism claim ("if it can rewrite the test, it isn't a check").
+# These are connectives, not topic words — that is what keeps the
+# answerability check a new dimension instead of a keyword-table tweak.
+CONNECTORS = [
+    "if ", "when ", "unless", "until ", "because", "before", "so ", "mean",
+    "fail", "break", "miss", "prov", "can't", "cannot", "without ",
+    "then ",
+    "如果", "當", "当", "因為", "因为", "所以", "意味", "只有", "除非",
+    "就會", "就会", "才會", "才会", "沒有", "没有", "不然", "否則", "否则",
+    "失敗", "失败",
+]
+
+# Judgment predications: the draft passes a verdict on a mechanism
+# ("a test ... is a self-grade", "not a benchmark", "is just
+# decoration"). The author can dispute the verdict — that is the hook.
+JUDGMENT_RE = re.compile(
+    r"(is a|isn'?t|is not|not a|the same as|just)\s+(a\s+)?"
+    r"(self-?grade|marketing|decoration|theatre|theater|fiction|noise|"
+    r"benchmark|check|test|verification|no test)\b",
+    re.IGNORECASE,
+)
+JUDGMENT_CJK = [
+    "是营销", "是行銷", "是装饰", "是裝飾", "是摆设", "是擺設",
+    "不是基准", "不是檢查", "不是检查", "自我评分", "自評",
+]
+
+# Sentence-initial verbs that issue a directive the author can push
+# back on ("Check at read time, or a stale PASS still looks valid").
+IMPERATIVE_VERBS = [
+    "check", "run", "try", "test", "verify", "write", "measure", "read",
+    "look", "ask", "use", "make", "keep", "stop", "start", "ship",
+    "watch", "count", "name", "pick", "set", "bind", "fail", "define",
+    "separate", "split", "grade", "audit",
+]
 URL_RE = re.compile(r"https?://\S+|www\.\S+")
 LATIN_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+-]{3,}")
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
@@ -161,8 +209,12 @@ def content_words(text: str) -> set[str]:
     return words
 
 
-def score(draft: str, post: str = "") -> dict:
-    """Score one reply draft. Returns score, verdict, checks and fixes."""
+def score(draft: str, post: str = "", thread_state: str = "") -> dict:
+    """Score one reply draft. Returns score, verdict, checks and fixes.
+
+    thread_state: "live" (author already replying back and forth in
+    this thread), "quiet" (cold target), or "" (unknown, no prior).
+    """
     text = draft.strip()
     checks: dict[str, dict] = {}
     fixes: list[str] = []
@@ -202,6 +254,10 @@ def score(draft: str, post: str = "") -> dict:
     }
     total += praise_points
 
+    # Shared content words with the original post — used by specificity
+    # (+8) and by answerability (a hook must name something from the post).
+    shared = content_words(text) & content_words(post) if post else set()
+
     # --- Specificity (0-30) ----------------------------------------------
     spec_points = 0
     spec_notes = []
@@ -221,7 +277,6 @@ def score(draft: str, post: str = "") -> dict:
     sharp_question = has_question and not find_all(text, GENERIC_QUESTIONS) \
         and any(w in text.lower() for w in WH_WORDS)
     if post:
-        shared = content_words(text) & content_words(post)
         if shared:
             spec_points += 8
             spec_notes.append(f"references the original post ({sorted(shared)[:4]})")
@@ -276,6 +331,88 @@ def score(draft: str, post: str = "") -> dict:
     }
     total += value_points
 
+    # --- Answerability (0-15) --------------------------------------------
+    # v1.1 (2026-11-19 evals, N=10, corrected ground truth): the four
+    # dimensions above measure whether a reply is well-made, not whether
+    # the author has anything to answer. Five true replies scored below
+    # SHIP while two SHIPs drew no reply — the misses all gave the
+    # author a refutable mechanism (read-time check, self-grade test,
+    # shadow-first) and the SHIPs gave none. Three legs, each +10,
+    # capped at 15:
+    #   A. a specific question that names a concrete term;
+    #   B. a falsifiable mechanism claim — a stance, a reason, or a
+    #      directive, plus a concrete term/number, plus a conditional
+    #      or causal connector (if/when/because/fails/breaks/...);
+    #   C. a judgment passed on a mechanism ("is a self-grade",
+    #      "not a benchmark", "is just decoration").
+    # A hook is structural: the connectors are connectives and the
+    # judgment nouns are verdicts, not topic keywords.
+    has_term = bool(terms) or bool(re.search(r"\d", text)) or bool(shared)
+    answer_points = 0
+    answer_notes = []
+    # Leg A: a specific question that names a concrete term. The
+    # question itself must carry the hook: take the last sentence
+    # before each "?" and require an explanation-seeking word
+    # (how/why/what/which — not who/when, which usually ask for a
+    # fact) plus a concrete term. A WH word in another sentence does
+    # not count: "when" in a setup clause plus "?" in a who-question
+    # is not a hook (evals #9).
+    hook_wh = ["how", "why", "what", "which", "怎么", "怎麼",
+               "为什么", "為什麼", "如何", "哪个", "哪個", "什么", "什麼"]
+    question_hook = False
+    for part in re.split(r"[?？]", text)[:-1]:
+        sents = [s.strip() for s in re.split(r"[.!?。！？；;]\s*", part)
+                 if s.strip()]
+        if not sents:
+            continue
+        q = sents[-1].lower()
+        if any(w in q for w in hook_wh) and (
+                domain_terms(q) or (shared and content_words(q) & shared)):
+            question_hook = True
+            break
+    if question_hook:
+        answer_points += 10
+        answer_notes.append("asks a specific question naming a concrete term")
+    sentences = [s.strip() for s in re.split(r"[.!?。！？；;]\s*", text) if s.strip()]
+    first_words = [s.split()[0].lower().strip(",;:") for s in sentences if s.split()]
+    imperative = any(w in IMPERATIVE_VERBS for w in first_words)
+    if (stance or imperative) and has_term and find_all(text, CONNECTORS):
+        answer_points += 10
+        answer_notes.append("makes a falsifiable claim about a mechanism")
+    if has_term and (JUDGMENT_RE.search(text) or find_all(text, JUDGMENT_CJK)):
+        answer_points += 10
+        answer_notes.append("passes a judgment on a mechanism")
+    answer_points = min(answer_points, 15)
+    if answer_points == 0:
+        fixes.append("Give the author something to answer: a specific "
+                     "question, or a falsifiable claim about how it "
+                     "works — a reply with no hook is a nod, not a "
+                     "conversation.")
+    checks["answerability"] = {
+        "points": answer_points,
+        "detail": "; ".join(answer_notes) or "no hook for the author",
+    }
+    total += answer_points
+
+    # --- Thread prior (-10 / 0 / +10) --------------------------------------
+    # The author is half the outcome: replies from authors already in
+    # conversation come back, cold targets mostly don't. The prior is an
+    # explicit input (--thread live|quiet), never inferred, so the score
+    # stays auditable and the eval set can record what was assumed.
+    prior_points = 0
+    prior_detail = "unknown (no --thread given)"
+    if thread_state == "live":
+        prior_points = 10
+        prior_detail = "live thread: author already replying back and forth"
+    elif thread_state == "quiet":
+        prior_points = -10
+        prior_detail = "quiet thread: cold target, no ongoing exchange"
+    checks["thread_prior"] = {
+        "points": prior_points,
+        "detail": prior_detail,
+    }
+    total += prior_points
+
     # --- Filler (penalty) --------------------------------------------------
     filler = find_all(text, FILLER)
     filler_points = -5 * min(len(filler), 3)
@@ -295,7 +432,19 @@ def score(draft: str, post: str = "") -> dict:
     total += filler_points
 
     total = max(0, min(100, total))
-    verdict = "SHIP" if total >= 70 else ("IMPROVE" if total >= 35 else "REWRITE")
+    # SHIP needs a hook: a reply that scores >= 70 on craft but gives
+    # the author nothing to answer caps at IMPROVE (the 2026-11-19 evals'
+    # two false positives were exactly that shape).
+    if total >= 70 and answer_points > 0:
+        verdict = "SHIP"
+    elif total >= 35:
+        verdict = "IMPROVE"
+        if total >= 70:
+            fixes.append("Scores like a SHIP but gives the author nothing "
+                         "to answer — add a specific question or a "
+                         "falsifiable claim about how it works.")
+    else:
+        verdict = "REWRITE"
     return {
         "score": total,
         "verdict": verdict,
@@ -336,6 +485,9 @@ def main(argv=None) -> int:
                         help="read the draft from a file")
     parser.add_argument("--post", default="",
                         help="the original post being replied to")
+    parser.add_argument("--thread", default="", choices=["live", "quiet"],
+                        help="thread state: live (author already replying "
+                             "back and forth) or quiet (cold target)")
     parser.add_argument("--json", action="store_true",
                         help="print the full result as JSON")
     args = parser.parse_args(argv)
@@ -346,7 +498,7 @@ def main(argv=None) -> int:
               "with --file, or on stdin.", file=sys.stderr)
         return 2
 
-    result = score(draft, args.post)
+    result = score(draft, args.post, args.thread)
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
