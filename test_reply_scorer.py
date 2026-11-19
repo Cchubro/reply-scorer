@@ -98,6 +98,60 @@ class TestVerdicts(unittest.TestCase):
             self.assertTrue(0 <= score(draft)["score"] <= 100)
 
 
+class TestAnswerability(unittest.TestCase):
+    # v1.1 (2026-11-19 evals): a reply needs a hook — a specific
+    # question naming a concrete term, or a falsifiable claim about
+    # how something works — or it caps at IMPROVE however well-made.
+
+    def test_specific_question_is_a_hook(self):
+        result = score(
+            "Good point about evals — how do you catch flaky tests "
+            "before they poison the whole suite?"
+        )
+        self.assertGreater(result["checks"]["answerability"]["points"], 0)
+
+    def test_mechanism_claim_is_a_hook(self):
+        # evals #3 (ganesh review-time): a self-grade test is a
+        # falsifiable claim about a mechanism.
+        result = score(
+            "That safeguard matters most: a test the agent wrote to prove "
+            "its own work is a self-grade. The check I trust is one the "
+            "agent can't rewrite — an outside test, or a run against the "
+            "real system."
+        )
+        self.assertGreater(result["checks"]["answerability"]["points"], 0)
+
+    def test_judgment_on_a_mechanism_is_a_hook(self):
+        result = score(
+            "No cost per task, and I read it as marketing, not a benchmark."
+        )
+        self.assertGreater(result["checks"]["answerability"]["points"], 0)
+
+    def test_hookless_high_score_caps_at_improve(self):
+        # evals #5 (Einsia, 72 in v1.0): well-made, no hook, no reply.
+        result = score(
+            "Rule induction at 0.6% — 5 right in 870 attempts — is the "
+            "number that matters. Agents execute a drawn operation fine, "
+            "but they almost never infer the rule themselves. Most real "
+            "specs arrive as a drawing or a diagram, not a written rule "
+            "— that's the gap."
+        )
+        self.assertEqual(result["checks"]["answerability"]["points"], 0)
+        self.assertEqual(result["verdict"], "IMPROVE")
+        self.assertGreaterEqual(result["score"], 70)
+
+    def test_thread_prior_moves_the_score(self):
+        draft = "Independent verification is the whole game — without it the loop just fails slower."
+        unknown = score(draft)
+        live = score(draft, thread_state="live")
+        quiet = score(draft, thread_state="quiet")
+        self.assertEqual(live["score"] - unknown["score"], 10)
+        self.assertEqual(unknown["score"] - quiet["score"], 10)
+        self.assertEqual(live["checks"]["thread_prior"]["points"], 10)
+        self.assertEqual(quiet["checks"]["thread_prior"]["points"], -10)
+        self.assertEqual(unknown["checks"]["thread_prior"]["points"], 0)
+
+
 class TestXLength(unittest.TestCase):
     def test_link_counts_23(self):
         self.assertEqual(x_length("see https://example.com/a/very/long/path here"), 4 + 23 + 5)
