@@ -73,12 +73,22 @@ python3 run_evals.py
 ```
 
 v1.0: plain 3/10, live 4/10 (error 70% / 60%). v1.1: plain 5/10,
-live 6/10 (error 50% / 40%). Residuals, recorded not hidden:
+live 6/10 (error 50% / 40%). v1.2: eval set grows to 16 (6 probe
+items from the first Meta review, ids 11–16); existing-10 live
+still 6/10 — no regression. Fixes: bare "this" no longer counts as
+empty praise (P1 18 → 33, equals its control); either/or questions
+and five tag-question forms (`, right?` / `, isn't it?` / `, aren't
+they?` / `, don't you?` / `, doesn't it?`) count as hooks
+(answerability 10 on P2c/P2d/P4b); short domain terms `api`/`ci`
+now match with word boundaries (P5 specificity 8 → 23, terms and
+shared include api/ci). Residuals, recorded not hidden:
 short follow-ups in live threads still miss (#2, #7, #8 — the draft
 is thin, the reply came from thread momentum); a who-question about
 the build process still reads as a hook but drew no reply (#9).
-Known gaps for the next iteration: 3-letter domain terms (`api`,
-`ci`) never match the 4+-letter word regex; fact-seeking questions
+The 6 probe items are minimal drafts on quiet threads and still
+score below SHIP — the fixes repaired the targeted sub-scores, not
+the verdicts; the next retro re-judges by live misjudgment rate.
+Known gaps for the next iteration: fact-seeking questions
 (who/when) are not yet distinguished from explanation-seeking ones
 (how/why).
 
