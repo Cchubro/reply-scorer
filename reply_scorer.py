@@ -57,7 +57,7 @@ GENERIC_PRAISE = [
     "great post", "great point", "great take", "great thread", "great work",
     "so true", "so real", "this is great", "this is amazing", "this is awesome",
     "love this", "love it", "well said", "couldn't agree more", "100%",
-    "exactly", "facts", "this", "🔥", "amazing", "incredible", "brilliant",
+    "exactly", "facts", "🔥", "amazing", "incredible", "brilliant",
     "太对了", "太對了", "说得太好了", "說得太好了", "说得好", "說得好",
     "太真实了", "太真實了", "学习了", "學習了", "收藏了",
     "干货满满", "乾貨滿滿", "支持", "写得太好了", "寫得太好了",
@@ -105,6 +105,9 @@ DOMAIN_TERMS_LATIN = [
     "harness", "suite", "flaky", "benchmark", "latency", "ci", "ship",
     "shipping", "tool", "tools", "debug", "trace", "retry", "checkpoint",
 ]
+# Short domain terms (< 4 letters) that the 4-letter word regex can never
+# match — matched with word boundaries only (v1.2, 2026-11-20: api, ci).
+SHORT_DOMAIN_TERMS = [t for t in DOMAIN_TERMS_LATIN if len(t) < 4]
 DOMAIN_TERMS_CJK = [
     "驗證", "验证", "迴圈", "回圈", "循环", "測試", "测试", "評估", "评估",
     "模型", "部署", "檢查", "检查", "代碼", "代码", "提示詞", "提示词",
@@ -184,6 +187,8 @@ def domain_terms(text: str) -> list[str]:
     low = text.lower()
     words = set(w.lower() for w in LATIN_WORD_RE.findall(text))
     found = [t for t in DOMAIN_TERMS_LATIN if t in words]
+    found += [t for t in SHORT_DOMAIN_TERMS
+              if re.search(r"\b" + re.escape(t) + r"\b", low)]
     found += [t for t in DOMAIN_TERMS_CJK if t in text]
     return sorted(set(found))
 
@@ -203,6 +208,10 @@ def content_words(text: str) -> set[str]:
         if len(w) > 4 and w.endswith("s"):
             w = w[:-1]
         words.add(w)
+    low = text.lower()
+    for t in SHORT_DOMAIN_TERMS:
+        if re.search(r"\b" + re.escape(t) + r"\b", low):
+            words.add(t)
     chars = CJK_RE.findall(text)
     for a, b in zip(chars, chars[1:]):
         words.add(a + b)
@@ -274,8 +283,15 @@ def score(draft: str, post: str = "", thread_state: str = "") -> dict:
         spec_points += 10
         spec_notes.append(f"names a concrete term ({terms[0]})")
     has_question = "?" in text or "？" in text
+    # Either/or question (v1.2, 2026-11-20): a forced-choice question is a
+    # hook the same way a WH question is — same term condition as leg A.
+    either_or_hook = any(
+        " or " in part.lower() and (
+            domain_terms(part)
+            or (shared and content_words(part) & shared))
+        for part in re.split(r"[?？]", text)[:-1])
     sharp_question = has_question and not find_all(text, GENERIC_QUESTIONS) \
-        and any(w in text.lower() for w in WH_WORDS)
+        and (any(w in text.lower() for w in WH_WORDS) or either_or_hook)
     if post:
         if shared:
             spec_points += 8
@@ -366,8 +382,20 @@ def score(draft: str, post: str = "", thread_state: str = "") -> dict:
         if not sents:
             continue
         q = sents[-1].lower()
-        if any(w in q for w in hook_wh) and (
-                domain_terms(q) or (shared and content_words(q) & shared)):
+        has_terms = bool(
+            domain_terms(q) or (shared and content_words(q) & shared))
+        if any(w in q for w in hook_wh) and has_terms:
+            question_hook = True
+            break
+        # Either/or question (v1.2, 2026-11-20): a forced-choice question
+        # gives the author something to answer — same term condition.
+        if " or " in q and has_terms:
+            question_hook = True
+            break
+        # Tag question (v1.2, 2026-11-20): exactly these five forms, never
+        # extended to all rhetorical questions.
+        if q.endswith((", right", ", isn't it", ", aren't they",
+                       ", don't you", ", doesn't it")) and has_terms:
             question_hook = True
             break
     if question_hook:
