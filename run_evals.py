@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Re-run the reply-scorer eval set and report accuracy.
 
-The eval set (evals.jsonl) is 10 real replies from 2026-11-17, with
-corrected ground truth (did the author reply back?) and the thread state
-at posting time. Prediction rule: SHIP (>= 70) = the author will reply.
+The eval set (evals.jsonl) is 16 items: 10 real replies from 2026-11-17
+(ids 1–10, the original set, with corrected ground truth — did the
+author reply back? — and the thread state at posting time) + 6 v1.2
+probe drafts (ids 11–16, ground truth YES each, from the first Meta
+review probes P1/P1b/P2c/P2d/P4b/P5). Prediction rule: SHIP (>= 70) =
+the author will reply.
 
 Two modes, printed side by side:
   plain  — score(draft) only: the original eval conditions (no --post,
@@ -12,9 +15,10 @@ Two modes, printed side by side:
            in a run, with the reconstructed one-line parent-post
            background and the thread prior.
 
-Exit code: 0 = no regression vs the recorded baseline (v1.0: 3/10);
-1 = live-mode accuracy fell below baseline, or the eval file is broken.
-A fix that does not improve the numbers is still shippable if the
+Exit code: 0 = no regression vs the recorded baseline (v1.0: 3/10) AND
+existing-10 live accuracy still >= 6/10; 1 = live-mode accuracy fell
+below baseline, existing-10 live fell below 6/10, or the eval file is
+broken. A fix that does not improve the numbers is still shippable if the
 residuals are recorded — but a fix that REGRESSES is not.
 
 Usage:
@@ -106,6 +110,18 @@ def main():
            plain_rows, plain_correct, total)
     report("live (with post + thread prior — how runs actually use it)",
            live_rows, live_correct, total)
+
+    # Release gate (W-7, 2026-11-20): the existing-10 original items are
+    # the no-regression set. The v1.0 baseline check below compares ALL
+    # items, so a fall in the existing 10 alone would not trip it once
+    # the probe items are in the file — this gate enforces it directly.
+    existing_rows = [r for r in live_rows if r["id"] <= 10]
+    existing_correct = sum(1 for r in existing_rows if r["ok"])
+    print(f"existing-10 live: {existing_correct}/10")
+    if existing_correct < 6:
+        print("REGRESSION: existing-10 live accuracy is below 6/10 — "
+              "do not ship this version.", file=sys.stderr)
+        return 1
 
     baseline = meta.get("baseline_accuracy") if meta else None
     if baseline is not None:
