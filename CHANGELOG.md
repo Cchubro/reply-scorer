@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.2.1 — 2026-11-20: eval runner regression gate (W-7)
+
+The v1.2 release gate compared all 16 eval items vs the v1.0 baseline
+(30%) and no longer enforced "existing 10 items no regression" — the
+existing 10 could fall below 6/10 live and the runner still exited 0.
+`run_evals.py` now reports existing-10 live accuracy separately and
+exits non-zero when it falls below 6/10; the docstring now describes
+the 16-item eval set. No scorer logic changed; existing-10 live still
+6/10, full-16 live 6/16, unit tests 18/18.
+
 ## v1.2 — 2026-11-20: first Meta review fixes (4 sub-item misses, one release)
 
 The first Meta review (patch 4, Part B) judged the scorer's live 6/10
