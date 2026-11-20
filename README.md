@@ -61,12 +61,14 @@ independent verification — scores 83/100, SHIP.
 
 ## Evals
 
-`evals.jsonl` is 10 real replies from 2026-11-17 with corrected
-ground truth (did the author reply back?) and the thread state at
-posting time. `run_evals.py` scores each one twice — plain (no
+`evals.jsonl` is 16 items: 10 real replies from 2026-11-17 (ids 1–10)
+with corrected ground truth (did the author reply back?) and the thread
+state at posting time, plus 6 v1.2 probe drafts (ids 11–16, ground truth
+YES each). `run_evals.py` scores each one twice — plain (no
 `--post`, no `--thread`, the original eval conditions) and live (with
 both, how runs actually use it) — and refuses to pass if live accuracy
-falls below the recorded baseline.
+falls below the recorded baseline, or if existing-10 live accuracy falls
+below 6/10.
 
 ```sh
 python3 run_evals.py
